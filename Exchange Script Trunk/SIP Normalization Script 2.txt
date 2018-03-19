@@ -1,0 +1,61 @@
+M={}
+trace.enable()
+
+function FindPatternDN(text,pattern)
+       return string.sub(text, string.find(text,pattern))
+end
+
+function GetUserDN(msg)
+    local uriString = msg:getUri("Diversion")
+    if uriString
+    then
+        local uri = sipUtils.parseUri(uriString)
+        if uri
+        then
+            local user = uri:getUser()
+            return user        
+        end
+    end
+end
+
+
+function ReplaceDiversionDN(msg,NewMask,Site)
+ 
+ return msg:applyNumberMask("Diversion",NewMask),msg:addHeaderValueParameter("Diversion","CUCM_Site",Site)
+
+end
+
+function TestingSite(DN)
+
+   if DN >"3256767000" and DN<"3256768000"
+   then 
+       local a ="1"
+       local b ="7XXXX"
+       local c ="BEZWV-DLK"
+   end
+  
+   if DN >"3256765999" and DN<"3256767000"
+   then 
+       local a ="2"
+       local b ="6XXXX"
+       local c ="BEZWV-DLK"
+   end
+
+
+return b,c
+end
+
+function M.outbound_INVITE(msg)
+          local VMask = GetUserDN(msg)
+          msg:addHeaderValueParameter("Diversion","CUCM_DN",VMask)   
+          if VMask>"3256767000" and VMask<"3256767999"
+          then 
+            ReplaceDiversionDN(msg,"7XXXX","BEZWV-DLK")
+         end
+         if VMask>"3256766000" and VMask<"3256766999"
+         then 
+             ReplaceDiversionDN(msg,"6XXXX","BEZWV-DLK")
+         end
+end
+
+return M

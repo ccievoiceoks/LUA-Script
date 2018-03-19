@@ -1,0 +1,42 @@
+M={}
+trace.enable()
+
+function FindPatternDN(text,pattern)
+       return string.sub(text, string.find(text,pattern))
+end
+
+function GetUserDN(msg)
+    local uriString = msg:getUri("Diversion")
+    if uriString
+    then
+        local uri = sipUtils.parseUri(uriString)
+        if uri
+        then
+            local user = uri:getUser()
+            return user        
+        end
+    end
+end
+
+
+function M.outbound_INVITE(msg)
+          local DiversionField=msg:getHeaderValues("Diversion")
+          local VMask = GetUserDN(msg)
+          msg:addHeaderValueParameter("Contact","mask",VMask)   
+          if VMask
+          then
+              local VMask2=FindPatternDN("32........",VMask)
+              msg:addHeaderValueParameter("Contact","mask2",VMask2)       
+          end
+          if VMask2>"3256767000" and VMask2 <"3256767999"
+          then         
+              msg:applyNumberMask("Diversion","7XXXX")
+          end
+          if VMask2>3256766000 and VMask2<3256766999
+          then         
+              msg:applyNumberMask("Diversion","6XXXX")
+          end
+
+end
+
+return M

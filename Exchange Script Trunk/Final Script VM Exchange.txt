@@ -1,0 +1,137 @@
+M={}
+trace.enable()
+
+-- Functions Definitions for the main Function
+
+   -- Function to retrieve the User Number from the Diversion Header
+
+          function GetUserDN(msg)
+           -- Retrieve all information from the Diversion Field
+              local uriString = msg:getUri("Diversion")
+              if uriString
+              then
+                   -- Retrieve the SIP URI
+                   local uri = sipUtils.parseUri(uriString)
+                   if uri
+                   then
+                        -- Retrieve the host number from the SIP URI
+                        local user = uri:getUser()
+                        return user        
+                   end
+              end
+          end
+
+    -- Function to replace the Diversion Header with the Short number and add into the header and the site location
+
+          function ReplaceDiversionDN(msg,NewMask,Site)
+ 
+           return msg:applyNumberMask("Diversion",NewMask),msg:addHeaderValueParameter("Diversion","CUCM_Site",Site)
+
+          end
+
+    -- Function which perform the DN test to place the right mask and Location and pass after the result to the main function
+    -- Pay attention that var a is only for information and is not used . it is just an index but not really used for the moment
+
+          function TestingSite(DN)
+
+             if DN >="3256767000" and DN<="3256767999"
+             then 
+                  local a ="1"
+                  local b ="7XXXX"
+                  local c ="BEZWV-DLK"
+                  return b,c
+             end
+  
+             if DN >="3256766000" and DN<="3256767999"
+             then 
+                  local a ="2"
+                  local b ="6XXXX"
+                  local c ="BEZWV-DLK"
+                  return b,c
+             end
+
+             if DN >="3256461000" and DN<="3256461019"
+             then 
+                  local a ="3"
+                  local b ="863XX"
+                  local c ="BEMOE"
+                  return b,c
+             end
+
+             if DN >="3251333100" and DN<="3251333999"
+             then 
+                  local a ="4"
+                  local b ="64XXX"
+                  local c ="BEING"
+                  return b,c
+             end
+
+             if DN >="3256230500" and DN<="3256230599"
+             then 
+                  local a ="5"
+                  local b ="65XXX"
+                  local c ="BEKORGDK"
+                  return b,c
+             end
+
+             if DN >="3256260470" and DN<="3256260499"
+             then 
+                  local a ="6"
+                  local b ="684XX"
+                  local c ="BEKORBAM"
+                  return b,c
+             end
+
+             if DN >="3256260590" and DN<="3256260599"
+             then 
+                  local a ="7"
+                  local b ="685XX"
+                  local c ="BEKORBAM"
+                  return b,c
+             end
+
+             if DN >="3256243130" and DN<="3256243139"
+             then 
+                  local a ="8"
+                  local b ="681XX"
+                  local c ="BEKORBAM"
+                  return b,c
+             end
+
+             if DN >="3256243170" and DN<="3256243179"
+             then 
+                  local a ="9"
+                  local b ="681XX"
+                  local c ="BEKORBAM"
+                  return b,c
+             end
+
+             if DN >="3256245910" and DN<="3256245929"
+             then 
+                  local a ="10"
+                  local b ="689XX"
+                  local c ="BEKORBAM"
+                  return b,c
+             end
+
+             if DN >="3293749100" and DN<="3293749399"
+             then 
+                  local a ="11"
+                  local b ="69XXX"
+                  local c ="BEAAL"
+                  return b,c
+             end
+          end
+
+
+
+ --- Main Function which is updqte the INVITE Message in Outbound direction
+
+function M.outbound_INVITE(msg)
+          local VMask = GetUserDN(msg)
+          msg:addHeaderValueParameter("Diversion","CUCM_DN",VMask)
+          local prefix,site=TestingSite(VMask)
+          ReplaceDiversionDN(msg,prefix,site) 
+end
+
+return M
