@@ -1,0 +1,198 @@
+--[[
+6/05/2018
+THIS IS A PROOF OF CONCEPT SCRIPT AND SHOULD BE TESTED PRIOR TO DEPLOYMENT INTO A PRODUCTION ENVIRONMENT.  
+THIS SCRIPT IS NOT SPECIFICALLY SUPPORTED BY TAC, CISCO SYSTEMS OR ANY OF ITS AFFILIATES.  
+
+If this script does not behave as expected, 
+1) change the 'trace.disable()' to 'trace.enable()'
+2) reset the SIP trunk
+3) place a couple of calls into the trunk to demonstrate the issue
+4) collect a detailed the SDI trace file
+5) mail the trace file, current SIP trunk script (if changes were made) and a description of the issue that includes
+   the date, time, calling/called numbers and the result to Dan Keller for review
+
+Dan Keller
+dakeller@cisco.com
+
+Purpose:
+This script is intended for customers that want to ALLOW or BLOCK anonymous calls into their system while blocking specific caller id's.
+In CUCM 8.5 and previous, digit analysis did not handle non-numeric dial strings.  So when routing based on calling party 
+number, and the calling party number was 'anonymous' or 'unavailable', CUCM could never accept the call.  This script
+removes the unroutable sting completely, thus allowing CUCM to route or block based on a <NULL> route pattern in the <Filter_List> partition.
+
+This script should be applied to any SIP Trunk on Cisco Unified Communications Manager that will be processing inbound calls
+that need to be allowed.  If this script is not applied, than all inbound calls from anonymous sources will be blocked by when
+using the configuration in the "Blocking Inbound calls to Cisco Unified Communications Manager based on Caller ID"
+(https://supportforums.cisco.com/document/71966/blocking-calls-based-calling-party-id)
+
+This script has been tested with the Call Blocking Application Note and works with CUCM 8.5.1, 9.1(x), 10.x, 11.x, 12.x
+NOTE: Early versions of 11.0 prevented the addition of the ! xlate pattern.  This defect was reported in CSCuv82528.
+	  This defect affected the following versions: 11.0(1.20000.2) and 11.0(1.10000.10)
+	  
+When configuring this script, set the Lua Instruction Threshold to 1500.
+
+Parameters: none
+
+Revision History:
+02/25/2014 - Original Script
+04/15/2014 - Added PPI to the fields to check
+07/01/2014 - Added the 'restricted' check
+08/13/2017 - Changed the search criteria from lower() to case insensitive.
+			 Enhanced the script to replace the modified from field on fix issues with a few providers
+05/30/2018 - Removed global variables and used per dialog context and added handling for reINVITE messages
+--]]
+
+M={}
+
+--change to trace.enable() to have trace output in SDI
+trace.enable()
+
+function M.outbound_INVITE(msg) --capture outbound INVITE/ReINVITE messages
+	trace.format("Processing a outbound INVITE or ReINVITE")
+	
+	--replace the to field with the original from header
+	if msg:isReInviteRequest()
+	then
+		local context = msg:getContext()
+		local tag = context["tag"]
+		local fromHeader = context["fromHeader"]
+		if (tag and fromHeader)
+		then
+			--get the To header
+			local calledNumber = msg:getHeader("To")
+			--replace the from field with the original header
+			trace.format("Found Context: tag: %s, fromHeader: %s", tag, fromHeader)
+			trace.format("Found reINVITE message.  Looking for tag in to header.....")
+			trace.format("Tag: %s, To Header: %s, size=%s", tag, calledNumber, string.len(tag))
+			if string.find(calledNumber, tag, 1, true)
+			then 
+				trace.format("Found header in TO and replacing with original header")
+				msg:modifyHeader("To", fromHeader)
+			else
+				trace.format("string.find failed to find %s in %s", tag, calledNumber)
+			end
+		else
+			trace.format("Failed to get Context")
+		end
+	else
+		trace.format("Not a ReINVITE message")
+	end
+		
+end
+
+
+function M.outbound_ANY_ANY(msg)  --capture any outbound response messages to the INVITE
+	trace.format("Processing a outbound response to INVITE")
+	local context = msg:getContext()
+	local tag = context["tag"]
+	local fromHeader = context["fromHeader"]
+	if (tag and fromHeader)
+	then
+		trace.format("Found Context: tag: %s, fromHeader: %s", tag, fromHeader)
+		--replace the from field with the original header
+		local header = msg:getHeader("From")
+		local tofield = msg:getHeader("To")
+		trace.format("Looking for tag in to and from header.....")
+		
+		if string.find(header, tag, 1, true)
+		then 
+			trace.format("Found header in FROM and replacing with original header")
+			msg:modifyHeader("From", fromHeader)
+			
+		--When a call requires a REINVITE, the original FROM field will become the TO field.  
+		--This script needs to adjust the TO field to look like the FROM field.  
+		elseif string.find(tofield, tag, 1, true)
+		then
+			trace.format("Found header in TO and replacing with original header")
+			msg:modifyHeader("To", fromHeader)
+		end
+	else
+		trace.format("Not an INVITE response.  No changes made")
+	end
+		
+end
+
+
+function M.inbound_INVITE(msg)  --capture inbound INVITE messages
+   --set the string to replace the anonymous, unavailable or restricted strings in the INVITE message
+   replacementNumber = "sip\:"
+   trace.format("Replacement Number: %s", replacementNumber)
+ 
+   --Set the header values to inspect for anonymous caller
+   local fields = { "From" , "Remote-Party-ID" , "P-Preferred-Identity", "P-Asserted-Identity" }
+   local numberOfFields = #fields 
+   trace.format("Fields/Count: %s, %s, %s, %s, %s", fields[1], fields[2], fields[3], fields[4], numberOfFields)
+   local newHeader = ""
+   
+   --loop though the header fields to inspect and replace any instance of 'anonymous' with the specified replacement number
+   --UCM will use the following headers for digit analysis: PAID, RPID, From
+   local x = 1
+   while  x <= numberOfFields do 
+
+      --get the field from the header
+      local header = msg:getHeader(fields[x])
+      if header == nil
+      then
+         trace.format("Field %s not found", fields[x])
+      else
+		 trace.format("Field %s: %s", fields[x], header)
+
+         --does the from contain anonymous
+         if string.find(header, "[Ss][Ii][Pp]\:[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss]")  
+         then
+            trace.format("Found string anonymous in %s", fields[x])
+            trace.format("Header: %s %s", fields[x], header)
+
+            --replace the word anonymous with the user defined replacement number
+           newHeader = string.gsub(header, "[Ss][Ii][Pp]\:[Aa][Nn][Oo][Nn][Yy][Mm][Oo][Uu][Ss]", replacementNumber) 
+           trace.format("New %s Field: %s", fields[x], newHeader)
+
+           --modify the From field
+           msg:modifyHeader(fields[x], newHeader)    
+         elseif string.find(header, "[Ss][Ii][Pp]\:[Uu][Nn][Aa][Vv][Aa][Ii][Ll][Aa][Bb][Ll][Ee]")
+         then
+            trace.format("Found string unavailable in %s", fields[x])
+            trace.format("Header: %s %s", fields[x], header)
+
+            --replace the word unavailable with the user defined replacement numbe
+           newHeader = string.gsub(header, "[Ss][Ii][Pp]\:[Uu][Nn][Aa][Vv][Aa][Ii][Ll][Aa][Bb][Ll][Ee]", replacementNumber) 
+           trace.format("New %s Field: %s", fields[x], newHeader)
+
+           --modify the From field
+           msg:modifyHeader(fields[x], newHeader)    
+         elseif string.find(header, "[Ss][Ii][Pp]\:[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ee][Dd]")
+         then
+            trace.format("Found string restricted in %s", fields[x])
+            trace.format("Header: %s %s", fields[x], header)
+
+            --replace the word unavailable with the user defined replacement number
+           newHeader = string.gsub(header, "[Ss][Ii][Pp]\:[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ee][Dd]", replacementNumber) 
+           trace.format("New %s Field: %s", fields[x], newHeader)
+
+           --modify the From field
+           msg:modifyHeader(fields[x], newHeader)    
+	      else
+            trace.format("Field %s number valid.  No change made.", fields[x])
+	      end
+		end
+	if x == 1
+	then 
+		--if there is a valid From header, create a local context and store the entire from string for outbound replacement
+		local context = msg:getContext()
+		if context
+		then
+			local startTag = string.find(header, "[Tt][Aa][Gg]") 
+			if startTag
+			then 
+				context["tag"] = string.sub(header, startTag + 4)
+				context["fromHeader"] = header
+				trace.format("Context:Tag: %s, fromHeader: %s", context["tag"], context["fromHeader"])		
+			end
+		end
+	end
+		
+	x = x+1
+   end
+end
+
+return M
